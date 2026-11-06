@@ -1,0 +1,5 @@
+[
+  {"idempotency_key": "demo-order-1001", "payload": {"synthetic": true, "type": "order.created", "order_id": "DEMO-1001", "total_minor": 12900, "currency": "KZT"}},
+  {"idempotency_key": "demo-stock-2001", "payload": {"synthetic": true, "type": "inventory.changed", "sku": "DEMO-NOTEBOOK", "quantity": 8}},
+  {"idempotency_key": "demo-report-3001", "payload": {"synthetic": true, "type": "report.requested", "report_id": "DEMO-3001", "period": "synthetic-week"}}
+]

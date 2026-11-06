@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flow Inbox · local event inspector</title>
+<style>
+  :root{color-scheme:light;--paper:#f6f8fb;--ink:#14213d;--blue:#2d4db0;--line:#d8e0ef;--muted:#56647a;--teal:#17766d;--amber:#9c5a12}
+  *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 "Avenir Next","Segoe UI",sans-serif}button{font:inherit;cursor:pointer;border:1px solid var(--line);background:white;color:var(--ink);padding:9px 15px;border-radius:7px}button:hover{border-color:var(--blue)}button:focus-visible,a:focus-visible{outline:3px solid var(--blue);outline-offset:3px}button:disabled{opacity:.55;cursor:wait}.primary{background:var(--blue);color:white;border-color:var(--blue)}header{max-width:1440px;margin:auto;padding:42px 40px 28px;display:flex;justify-content:space-between;align-items:center;gap:28px}h1{font-size:38px;line-height:1.1;letter-spacing:-1.6px;margin:0 0 10px}p{margin:0;max-width:68ch;color:var(--muted)}.mark{display:flex;align-items:center;gap:18px}.signal{width:12px;height:55px;background:repeating-linear-gradient(to bottom,var(--blue) 0 7px,transparent 7px 12px);flex-shrink:0}.local{padding:6px 11px;border:1px solid var(--line);border-radius:20px;white-space:nowrap;color:var(--muted);font-size:13px}main{max-width:1440px;margin:auto;padding:0 40px 40px}.toolbar{display:flex;gap:8px;flex-wrap:wrap;padding:20px 0;border-top:1px solid var(--line)}#message{min-height:25px;margin-bottom:20px;color:var(--muted)}#message.error{color:#a12638}.workspace{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(290px,1fr);gap:30px}.queue{min-width:0}.section-title{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:14px}h2{font-size:19px;letter-spacing:-.35px;margin:0}.section-title span{color:var(--muted);font-size:13px}.table-wrap{overflow:auto;background:#fff;border-top:3px solid var(--ink);border-bottom:1px solid var(--line)}table{border-collapse:collapse;width:100%;text-align:left;white-space:nowrap}th{padding:14px 16px;color:var(--muted);font-size:12px;font-weight:600;border-bottom:1px solid var(--line)}td{padding:15px 16px;border-bottom:1px solid #edf0f6;font-size:13px}td:first-child{max-width:240px;overflow:hidden;text-overflow:ellipsis}.event-link{border:0;padding:0;background:transparent;color:var(--blue);font-size:13px;text-align:left;border-radius:0}.status{display:inline-block;padding:3px 8px;background:#edf1fb;border-radius:4px}.status.succeeded{background:#e8f4f1;color:var(--teal)}.status.dead{background:#fbecef;color:#a12638}.status.processing{background:#fff1de;color:var(--amber)}.empty{padding:38px 20px;text-align:center;color:var(--muted)}.inspector{background:#eaf0fa;padding:22px;min-width:0;align-self:start;border-top:3px solid var(--blue)}.inspector p{font-size:13px;margin:10px 0 20px}pre{font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;max-height:65vh;overflow:auto}footer{margin-top:28px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;max-width:100ch}@media(max-width:900px){header{padding:30px 20px 24px}main{padding:0 20px 30px}.workspace{grid-template-columns:1fr}.local{display:none}h1{font-size:32px}.inspector pre{max-height:45vh}}
+</style>
+<header>
+  <div class="mark"><span class="signal" aria-hidden="true"></span><div><h1>Flow Inbox</h1><p>Follow an event from intake to its final attempt.</p></div></div>
+  <span class="local">Local demonstrator</span>
+</header>
+<main>
+  <div class="toolbar" aria-label="Inbox actions">
+    <button class="primary" id="seed">Add synthetic events</button>
+    <button id="success">Simulate success</button>
+    <button id="retry">Simulate retry</button>
+    <button id="refresh">Refresh state</button>
+  </div>
+  <p id="message" role="status" aria-live="polite">Loading stored events…</p>
+  <div class="workspace">
+    <section class="queue" aria-labelledby="events-title">
+      <div class="section-title"><h2 id="events-title">Event queue</h2><span>Latest 100 events</span></div>
+      <div class="table-wrap"><table><thead><tr><th scope="col">Idempotency key</th><th scope="col">State</th><th scope="col">Attempts</th><th scope="col">Next eligible</th></tr></thead><tbody id="events"></tbody></table><p class="empty" id="empty" hidden>No events yet. Add synthetic events to explore the inbox.</p></div>
+    </section>
+    <section class="inspector" aria-labelledby="inspect-title">
+      <h2 id="inspect-title">Event inspector</h2>
+      <p>Select an event to see its stored payload and ordered history. Lease tokens are visible only to the claiming worker.</p>
+      <pre id="detail" tabindex="0">No event selected.</pre>
+    </section>
+  </div>
+  <footer>All bundled events are synthetic. Simulation changes local inbox state only; it sends no webhooks and executes no external URLs. A claim lasts 30 seconds. Explicit retries wait 2, 4, 8, 16, then 30 seconds; attempt 6 is the final attempt.</footer>
+</main>
+<script>
+  const message = document.querySelector('#message');
+  const buttons = [...document.querySelectorAll('.toolbar button')];
+  let selected = null;
+  async function api(path, body, headers = {}) {
+    const options = body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)};
+    const response = await fetch(path, options);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+    return data;
+  }
+  function tell(text, error = false) { message.textContent = text; message.classList.toggle('error', error); }
+  async function inspect(id) {
+    const data = await api(`/api/events/${encodeURIComponent(id)}`);
+    selected = id;
+    document.querySelector('#detail').textContent = JSON.stringify(data.event, null, 2);
+  }
+  async function refresh() {
+    const {events} = await api('/api/events?limit=100');
+    const tbody = document.querySelector('#events');
+    tbody.replaceChildren();
+    document.querySelector('#empty').hidden = events.length !== 0;
+    for (const event of events) {
+      const row = document.createElement('tr');
+      const key = document.createElement('td');
+      const link = document.createElement('button');
+      link.className = 'event-link'; link.textContent = event.idempotency_key;
+      link.addEventListener('click', () => action(async () => { await inspect(event.id); return 'Stored event and history loaded.'; }));
+      key.append(link); row.append(key);
+      const state = document.createElement('td');
+      const badge = document.createElement('span'); badge.className = `status ${event.status}`; badge.textContent = event.status; state.append(badge); row.append(state);
+      const attempts = document.createElement('td'); attempts.textContent = `${event.attempts} / 6`; row.append(attempts);
+      const next = document.createElement('td'); next.textContent = event.status === 'pending' ? new Date(event.available_at * 1000).toLocaleTimeString() : '—'; row.append(next);
+      tbody.append(row);
+    }
+    if (selected) await inspect(selected);
+    return `${events.length} stored event${events.length === 1 ? '' : 's'} shown. Refreshed ${new Date().toLocaleTimeString()}.`;
+  }
+  async function action(task) {
+    buttons.forEach(button => button.disabled = true);
+    try { tell(await task()); } catch (error) { tell(`${error.message}. Refresh state before retrying an uncertain action.`, true); }
+    finally { buttons.forEach(button => button.disabled = false); }
+  }
+  document.querySelector('#refresh').addEventListener('click', () => action(refresh));
+  document.querySelector('#seed').addEventListener('click', () => action(async () => {
+    const events = await api('/sample_events.json'); let created = 0;
+    for (const event of events) { const result = await api('/api/events', event.payload, {'Idempotency-Key':event.idempotency_key}); if (result.created) created++; }
+    await refresh(); return `${created} synthetic event${created === 1 ? '' : 's'} added. Existing matching keys were deduplicated.`;
+  }));
+  async function simulate(outcome) {
+    const {event} = await api('/api/claim', {});
+    if (!event) { await refresh(); return 'No event is eligible now. Wait for its retry delay or add synthetic events.'; }
+    const body = {lease_token:event.lease_token};
+    if (outcome === 'retry') body.error = 'synthetic dashboard failure';
+    await api(`/api/events/${event.id}/${outcome}`, body);
+    selected = event.id; await refresh();
+    return outcome === 'complete' ? 'One local success simulated.' : 'One local failure simulated. Inspect the retry delay or final state.';
+  }
+  document.querySelector('#success').addEventListener('click', () => action(() => simulate('complete')));
+  document.querySelector('#retry').addEventListener('click', () => action(() => simulate('retry')));
+  action(refresh);
+</script>
+</html>

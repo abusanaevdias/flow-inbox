@@ -122,6 +122,17 @@ class APITests(unittest.TestCase):
         self.assertEqual(status, 503)
         self.assertNotIn(self.tmp.name, json.dumps(data))
 
+    def test_dashboard_is_served_without_exposing_arbitrary_local_files(self):
+        connection = http.client.HTTPConnection(*self.api.server_address, timeout=3)
+        self.addCleanup(connection.close)
+        connection.request("GET", "/")
+        response = connection.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("Content-Type"), "text/html; charset=utf-8")
+        self.assertGreater(len(response.read()), 100)
+        status, _ = self.request("GET", "/core.py")
+        self.assertEqual(status, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

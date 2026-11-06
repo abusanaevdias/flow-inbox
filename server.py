@@ -3,6 +3,7 @@
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from pathlib import Path
 import socket
 import sqlite3
 from urllib.parse import parse_qs, urlsplit
@@ -49,12 +50,14 @@ def make_server(inbox, *, port=8765):
             pass
 
         def _send(self, status, data):
-            body = json.dumps(data, ensure_ascii=True, allow_nan=False).encode("utf-8")
+            is_html = isinstance(data, bytes)
+            body = data if is_html else json.dumps(data, ensure_ascii=True, allow_nan=False).encode("utf-8")
             self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Type", "text/html; charset=utf-8" if is_html else "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
@@ -88,7 +91,9 @@ def make_server(inbox, *, port=8765):
             parsed = urlsplit(self.path)
             parts = parsed.path.strip("/").split("/")
             if method == "GET" and parsed.path == "/":
-                return 200, {"service": "flow-inbox", "events": "/api/events", "mode": "local demonstrator"}
+                return 200, Path(__file__).with_name("dashboard.html").read_bytes()
+            if method == "GET" and parsed.path == "/sample_events.json" and not parsed.query:
+                return 200, parse_json(Path(__file__).with_name("sample_events.json").read_bytes())
             if method == "GET" and parsed.path == "/api/events":
                 query = parse_qs(parsed.query, keep_blank_values=True)
                 if set(query) - {"limit"} or len(query.get("limit", ["50"])) != 1:
