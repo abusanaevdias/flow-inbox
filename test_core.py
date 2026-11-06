@@ -136,6 +136,35 @@ class InboxTests(unittest.TestCase):
             self.inbox.get("missing")
         self.assertEqual(self.inbox.list_events(), [])
 
+    def test_non_scalar_unicode_key_rejected_without_inserting(self):
+        with self.assertRaises(core.InvalidInput):
+            self.inbox.accept("demo-\ud800", {"synthetic": True})
+        self.assertEqual(self.inbox.list_events(), [])
+
+    def test_non_scalar_unicode_retry_error_preserves_live_lease(self):
+        event, _ = self.inbox.accept("unicode-retry", {"synthetic": True})
+        claimed = self.inbox.claim()
+        with self.assertRaises(core.InvalidInput):
+            self.inbox.retry(event["id"], claimed["lease_token"], "failure-\ud800")
+        current = self.inbox.get(event["id"])
+        self.assertEqual(current["status"], "processing")
+        self.assertEqual([item["action"] for item in current["history"]], ["accepted", "claimed"])
+        self.assertEqual(self.inbox.complete(event["id"], claimed["lease_token"])["status"], "succeeded")
+
+    def test_non_scalar_event_identifier_is_invalid_input(self):
+        with self.assertRaises(core.InvalidInput):
+            self.inbox.get("event-\ud800")
+        with self.assertRaises(core.InvalidInput):
+            self.inbox.complete("event-\ud800", "token")
+
+    def test_valid_non_bmp_unicode_survives_key_payload_and_retry(self):
+        event, _ = self.inbox.accept("demo-😀", {"message": "Synthetic 😀"})
+        claimed = self.inbox.claim()
+        retried = self.inbox.retry(event["id"], claimed["lease_token"], "Synthetic retry 😀")
+        self.assertEqual(retried["idempotency_key"], "demo-😀")
+        self.assertEqual(retried["payload"]["message"], "Synthetic 😀")
+        self.assertEqual(retried["last_error"], "Synthetic retry 😀")
+
 
 if __name__ == "__main__":
     unittest.main()

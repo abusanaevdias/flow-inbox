@@ -48,6 +48,33 @@ class WorkerTests(unittest.TestCase):
             self.assertNotIn("Traceback", result.stderr)
             self.assertEqual(Inbox(db).list_events(), [])
 
+    def test_cli_unicode_key_fixture_is_structured_error_without_traceback(self):
+        worker = Path(__file__).with_name("worker.py")
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = Path(temp) / "unicode.json"
+            fixture.write_text(json.dumps([{"idempotency_key": "demo-\ud800", "payload": {"synthetic": True}}]))
+            db = Path(temp) / "inbox.sqlite3"
+            result = subprocess.run([sys.executable, str(worker), "--db", str(db), "seed", str(fixture)], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 1)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertIn("error", json.loads(result.stderr))
+            self.assertEqual(Inbox(db).list_events(), [])
+
+    def test_cli_invalid_unicode_retry_argument_does_not_claim(self):
+        worker = Path(__file__).with_name("worker.py")
+        with tempfile.TemporaryDirectory() as temp:
+            db = Path(temp) / "inbox.sqlite3"
+            inbox = Inbox(db)
+            event, _ = inbox.accept("cli-invalid-retry", {"synthetic": True})
+            # POSIX undecodable argument bytes arrive through surrogateescape.
+            result = subprocess.run([sys.executable, str(worker), "--db", str(db), "run-once", "--outcome", "retry", "--error", "invalid-\udcff"], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 1)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertIn("error", json.loads(result.stderr))
+            current = inbox.get(event["id"])
+            self.assertEqual(current["status"], "pending")
+            self.assertEqual(current["attempts"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

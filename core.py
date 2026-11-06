@@ -32,9 +32,25 @@ class StaleLease(Exception):
     """The caller no longer owns a live processing lease."""
 
 
+def _require_utf8(value, field):
+    if not isinstance(value, str):
+        raise InvalidInput(f"{field} must be a string")
+    try:
+        value.encode("utf-8")
+    except UnicodeError as exc:
+        raise InvalidInput(f"{field} must contain valid Unicode scalar values") from exc
+
+
+def validate_retry_error(error):
+    _require_utf8(error, "error")
+    if not 1 <= len(error) <= 1_000:
+        raise InvalidInput("error must contain 1–1000 characters")
+
+
 class Inbox:
     def __init__(self, path, *, clock=time.time):
         self.path = str(Path(path))
+        _require_utf8(self.path, "database path")
         self.clock = clock
         with closing(self._connect()) as db:
             db.execute("PRAGMA journal_mode=WAL")
@@ -104,6 +120,7 @@ class Inbox:
         return event
 
     def accept(self, key, payload):
+        _require_utf8(key, "idempotency key")
         if not isinstance(key, str) or not 1 <= len(key) <= 200 or any(ord(c) < 32 or ord(c) == 127 for c in key):
             raise InvalidInput("idempotency key must be 1–200 characters without controls")
         if not isinstance(payload, dict):
@@ -168,6 +185,8 @@ class Inbox:
 
     @staticmethod
     def _owned(db, event_id, token, now):
+        _require_utf8(event_id, "event_id")
+        _require_utf8(token, "lease_token")
         if not isinstance(token, str) or not token:
             raise InvalidInput("lease_token is required")
         row = db.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
@@ -190,8 +209,7 @@ class Inbox:
             return self._view(db.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone())
 
     def retry(self, event_id, token, error):
-        if not isinstance(error, str) or not 1 <= len(error) <= 1_000:
-            raise InvalidInput("error must contain 1–1000 characters")
+        validate_retry_error(error)
         with self._write() as db:
             now = self.clock()
             row = self._owned(db, event_id, token, now)
@@ -207,6 +225,7 @@ class Inbox:
             return self._view(db.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone())
 
     def get(self, event_id):
+        _require_utf8(event_id, "event_id")
         with closing(self._connect()) as db:
             db.execute("BEGIN")
             row = db.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()

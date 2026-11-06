@@ -133,6 +133,20 @@ class APITests(unittest.TestCase):
         status, _ = self.request("GET", "/core.py")
         self.assertEqual(status, 404)
 
+    def test_non_scalar_unicode_retry_is_client_error_without_mutation(self):
+        self.request("POST", "/api/events", {"synthetic": True}, {"Idempotency-Key": "unicode-retry"})
+        _, claimed = self.request("POST", "/api/claim", {})
+        event = claimed["event"]
+        status, data = self.request("POST", f"/api/events/{event['id']}/retry", {"lease_token": event["lease_token"], "error": "failure-\ud800"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+        _, current = self.request("GET", f"/api/events/{event['id']}")
+        self.assertEqual(current["event"]["status"], "processing")
+        self.assertEqual([item["action"] for item in current["event"]["history"]], ["accepted", "claimed"])
+        status, completed = self.request("POST", f"/api/events/{event['id']}/complete", {"lease_token": event["lease_token"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(completed["event"]["status"], "succeeded")
+
 
 if __name__ == "__main__":
     unittest.main()

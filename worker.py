@@ -6,7 +6,7 @@ from pathlib import Path
 import sqlite3
 import sys
 
-from core import Conflict, Inbox, InvalidInput, NotFound, StaleLease
+from core import Conflict, Inbox, InvalidInput, NotFound, StaleLease, validate_retry_error
 from server import parse_json
 
 
@@ -40,8 +40,8 @@ def main():
         elif args.command == "inspect":
             result = {"event": inbox.get(args.event_id)} if args.event_id else {"events": inbox.list_events()}
         else:
-            if args.outcome == "retry" and not 1 <= len(args.error) <= 1_000:
-                raise InvalidInput("error must contain 1–1000 characters")
+            if args.outcome == "retry":
+                validate_retry_error(args.error)
             event = inbox.claim()
             if event is not None:
                 if args.outcome == "complete":

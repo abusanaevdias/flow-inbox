@@ -62,7 +62,7 @@ curl -i http://127.0.0.1:8765/api/events \
   --data '{"synthetic":true,"type":"demo.received"}'
 ```
 
-Errors use `{"error":"..."}`: 400 invalid input, 404 absent route/event, 405 unsupported method, 408 read timeout, 409 conflict/stale lease, 411 missing length, 413 oversized body, 415 unsupported media, 503 unavailable SQLite storage, or 500 unexpected server error. Intake keys are 1–200 characters without control characters. Retry error text is limited to 1,000 characters. Duplicate JSON object keys, non-finite values, and non-object payloads are rejected.
+Errors use `{"error":"..."}`: 400 invalid input, 404 absent route/event, 405 unsupported method, 408 read timeout, 409 conflict/stale lease, 411 missing length, 413 oversized body, 415 unsupported media, 503 unavailable SQLite storage, or 500 unexpected server error. Intake keys are 1–200 characters without control characters. Retry error text is limited to 1,000 characters. Text bound to SQLite must contain valid Unicode scalar values; escaped lone surrogates are rejected as input errors. Duplicate JSON object keys, non-finite values, and non-object payloads are rejected.
 
 ## Verification and scope
 
